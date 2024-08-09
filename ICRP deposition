@@ -1,0 +1,39 @@
+
+# Constants and parameters from ICRP 66 and the paper
+params = {
+    'ET2': {'a_aero': 1.1e-4, 'R_aero': lambda d_ae, Q, V: d_ae**2 * (Q * V)**0.6 * V**-0.2, 'P_aero': 1.4,
+            'a_thermo': 9, 'R_thermo': lambda D, Q: D * Q**-0.25, 'P_thermo': 0.5},
+    'BB': {'a_aero': 4.08e-6, 'R_aero': lambda d_ae, Q, V: d_ae**2 * Q * 2.3, 'P_aero': 1.152,
+           'a_thermo': 22.02, 'R_thermo': lambda D, Q: D * 2.3, 'P_thermo': 0.6391},
+    'bb': {'a_aero': 0.1147, 'R_aero': lambda d_ae, Q, V: 0.056 * d_ae**1.5 * d_ae**-0.25, 'P_aero': 1.173,
+           'a_thermo': 76.8 + 167, 'R_thermo': lambda D, Q: D * 1.5, 'P_thermo': 0.5676},
+    'AL': {'a_aero': 0.146, 'R_aero': lambda d_ae, Q, V: d_ae**2 * Q, 'P_aero': 0.6495,
+           'a_thermo': 170 + 103, 'R_thermo': lambda D, Q: D * 1.5, 'P_thermo': 0.6101},
+}
+
+
+# Calculate aerodynamic and thermodynamic deposition efficiencies
+def calculate_aero_deposition_fraction(region, d_ae, Q, V, V_D_ET2, V_D_BB_p, V_D_bb_p):
+    a = params[region]['a_aero']
+    R = params[region]['R_aero'](d_ae, Q, V)
+    P = params[region]['P_aero']
+    phi = calculate_volumetric_fraction(region, V, V_D_ET2, V_D_BB_p, V_D_bb_p)
+    return 1 - np.exp(-a * (R * phi) ** P)
+
+def calculate_thermo_deposition_fraction(region, D, Q, V, V_D_ET2, V_D_BB_p, V_D_bb_p):
+    a = params[region]['a_thermo']
+    R = params[region]['R_thermo'](D, Q)
+    P = params[region]['P_thermo']
+    phi = calculate_volumetric_fraction(region, V, V_D_ET2, V_D_BB_p, V_D_bb_p)
+    return 1 - np.exp(-a * (R * phi) ** P)
+
+# Calculate combined deposition fractions for each region
+def calculate_combined_deposition_fraction(region, d_ae, Q, V, D, V_D_ET2, V_D_BB_p, V_D_bb_p):
+    aero_dep_frac = calculate_aero_deposition_fraction(region, d_ae, Q, V, V_D_ET2, V_D_BB_p, V_D_bb_p)
+    thermo_dep_frac = calculate_thermo_deposition_fraction(region, D, Q, V, V_D_ET2, V_D_BB_p, V_D_bb_p)
+    combined_dep_frac = aero_dep_frac + thermo_dep_frac - aero_dep_frac * thermo_dep_frac
+    return combined_dep_frac
+
+
+### Reference
+# Human respiratory tract model for radiological protection. A report of a Task Group of the International Commission on Radiological Protection [published correction appears in Ann ICRP 1995;25(3-4):iii] [published correction appears in Ann ICRP. 2002;32(1-2):307-9]. Ann ICRP. 1994;24(1-3):1-482.
