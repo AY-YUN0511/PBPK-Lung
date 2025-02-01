@@ -1,0 +1,46 @@
+import numpy as np
+from scipy.stats import lognorm
+import matplotlib.pyplot as plt
+
+# Particle size distribution parameters (example values)
+D50 = 2  # µm
+D10 = 1  # µm
+D90 = 5  # µm
+
+# Log-normal distribution parameters
+GMD = D50  # Geometric Mean Diameter
+GSD = (D90 / D10) ** (3)  # Geometric Standard Deviation
+
+# Generate particle sizes based on log-normal distribution
+particle_sizes = lognorm.rvs(s=np.log(GSD), scale=GMD, size=1000)
+
+# Plot particle size distribution on a linear scale
+plt.figure(figsize=(12, 6))
+
+plt.subplot(1, 2, 1)
+plt.hist(particle_sizes, bins=50, edgecolor='black', density=True, alpha=0.6, color='g')
+x = np.linspace(min(particle_sizes), max(particle_sizes), 1000)
+pdf = lognorm.pdf(x, s=np.log(GSD), scale=GMD)
+plt.plot(x, pdf, 'k-', lw=2, label='Log-normal fit')
+plt.xlabel('Particle Size (µm)')
+plt.ylabel('Density')
+plt.title('Particle Size Distribution (Linear Scale)')
+plt.legend()
+plt.grid(True)
+
+# Plot particle size distribution on a logarithmic scale
+log_particle_sizes = np.log(particle_sizes[particle_sizes > 0])
+plt.subplot(1, 2, 2)
+plt.hist(log_particle_sizes, bins=50, edgecolor='black', density=True, alpha=0.6, color='b')
+mu, sigma = np.mean(log_particle_sizes), np.std(log_particle_sizes)
+x_log = np.linspace(min(log_particle_sizes), max(log_particle_sizes), 1000)
+pdf_log = (1 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-(x_log - mu) ** 2 / (2 * sigma ** 2))
+plt.plot(x_log, pdf_log, 'r-', lw=2, label='Normal fit')
+plt.xlabel('Log(Particle Size)')
+plt.ylabel('Density')
+plt.title('Particle Size Distribution (Logarithmic Scale)')
+plt.legend()
+plt.grid(True)
+
+plt.tight_layout()
+plt.show()
