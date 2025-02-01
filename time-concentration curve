@@ -1,0 +1,257 @@
+# REPLACE WITH OWN DATA
+
+import numpy as np
+from scipy.optimize import curve_fit
+import pandas as pd
+import matplotlib.pyplot as plt
+from scipy.stats import linregress
+# Example data for multiple animals in IV study (3 animals for demonstration)
+time_iv = np.array([0.083, 0.5, 1.0, 3.0, 6.0, 8.0, 24.0])
+concentration_iv = np.array([
+    [1,1,1,1,1],  # Animal 1
+    [5,4,3,2,1]    # Animal 2
+])
+
+# Example data for multiple animals in inhalation study (3 animals for demonstration)
+time_inhalation = np.array([0.083, 0.5, 1.0, 3.0, 6.0, 8.0, 24.0])
+concentration_inhalation = np.array([
+    [1,2,3,2,1],   # Animal 1
+    [2,2,2,2,2]   # Animal 2
+
+])
+
+# Example values
+miu_value = 5  # miu/mg
+dose_miu_iv = 1  # Example dose in miu
+dose_miu_inh =1
+deposited_dose_iv = np.array([1,1,1])  # Example deposited doses in miu/kg for IV
+deposited_dose_inh = np.array([3,3,3])  # Example deposited doses in miu/kg for inhalation
+
+# Convert dose to mg
+dose_mg_iv = dose_miu_iv / miu_value  # mg
+dose_mg_inh = dose_miu_inh / miu_value  # mg
+
+# Convert dose to pg (1 mg = 10^12 pg)
+dose_iv = dose_mg_iv * 1e12  # pg
+dose_inhalation = dose_mg_inh * 1e12  # pg
+
+print(f"IV dose: {dose_iv:.2e} pg")
+print(f"Inhalation dose: {dose_inhalation:.2e} pg")
+
+# Functions for the models
+def iv_model(t, ke, F):
+    return F * dose_iv * np.exp(-ke * t)
+
+def pk_model(t, ka, ke, F):
+    return F * dose_inhalation * ka / (ka - ke) * (np.exp(-ke * t) - np.exp(-ka * t))
+
+# Helper function to calculate AUC using the linear trapezoidal rule
+def calculate_auc_linear(time, concentration):
+    """
+    Calculate the area under the concentration-time curve (AUC) using the linear trapezoidal rule.
+    """
+    time = np.asarray(time)
+    concentration = np.asarray(concentration)
+    auc = 0.0
+
+    for i in range(1, len(time)):
+        dt = time[i] - time[i - 1]
+        avg_concentration = (concentration[i] + concentration[i - 1]) / 2.0
+        auc += dt * avg_concentration
+
+    return auc
+
+# Helper function to calculate AUC using the log trapezoidal rule
+def calculate_auc_log(time, concentration):
+    """
+    Calculate the area under the concentration-time curve (AUC) using the log trapezoidal rule.
+    """
+    time = np.asarray(time)
+    concentration = np.asarray(concentration)
+    auc = 0.0
+
+    for i in range(1, len(time)):
+        dt = time[i] - time[i - 1]
+        if concentration[i] > 0 and concentration[i - 1] > 0:
+            auc += (concentration[i] - concentration[i - 1]) / np.log(concentration[i] / concentration[i - 1]) * dt
+
+    return auc
+
+# Helper function to calculate terminal elimination half-life
+def calculate_terminal_half_life(time, concentration):
+    # Use the last few points for the terminal phase
+    terminal_phase = slice(-3, None)  # Adjust this slice as needed
+    time_terminal = time[terminal_phase]
+    conc_terminal = concentration[terminal_phase]
+
+    # Perform linear regression on the log-transformed data
+    slope, intercept, r_value, p_value, std_err = linregress(time_terminal, np.log(conc_terminal))
+
+    # Terminal elimination rate constant (λz) is the negative of the slope
+    lambda_z = -slope
+
+    # Terminal elimination half-life
+    terminal_half_life = np.log(2) / lambda_z
+
+    return terminal_half_life
+
+# Arrays to store estimated parameters and calculated metrics
+ke_iv_all = []
+F_iv_all = []
+ka_inhalation_all = []
+ke_inhalation_all = []
+F_inhalation_all = []
+
+# Arrays to store fitted concentration data
+fitted_concentration_iv = []
+fitted_concentration_inhalation = []
+
+# Arrays to store calculated pharmacokinetic metrics for IV and inhalation data
+metrics_iv = []
+metrics_inhalation = []
+
+# Process IV data
+for i in range(concentration_iv.shape[0]):
+    # IV Data for current animal
+    conc_iv = concentration_iv[i]
+    deposited_dose_iv_i = deposited_dose_iv[i]  # Deposited dose for current animal in miu/kg
+
+    # Calculate AUC_IV using the trapezoidal rule
+    auc_iv_linear = calculate_auc_linear(time_iv, conc_iv)
+    auc_iv_log = calculate_auc_log(time_iv, conc_iv)
+
+    # Estimate clearance (CL)
+    cl = dose_iv / auc_iv_linear  # Typically use linear AUC for clearance calculation
+
+    # Initial parameter guess for ke and F (bioavailability is 1 for IV)
+    initial_guess_iv = [0.1, 1.0]
+
+    # Fit the IV model to the IV data
+    params_iv, _ = curve_fit(iv_model, time_iv, conc_iv, p0=initial_guess_iv)
+    ke_iv, F_iv = params_iv
+
+    # Store estimated parameters
+    ke_iv_all.append(ke_iv)
+    F_iv_all.append(F_iv)
+
+    # Store fitted concentrations
+    fitted_concentration_iv.append(iv_model(time_iv, ke_iv, F_iv))
+
+    # Calculate pharmacokinetic metrics for IV data
+    tmax_iv = time_iv[np.argmax(conc_iv)]
+    cmax_iv = np.max(conc_iv)
+    cmax_dose_iv = cmax_iv / deposited_dose_iv_i  # Normalize by deposited dose
+    auclast_iv_linear = auc_iv_linear
+    auclast_dose_iv_linear = auclast_iv_linear / deposited_dose_iv_i  # Normalize by deposited dose
+    auclast_iv_log = auc_iv_log
+    auclast_dose_iv_log = auclast_iv_log / deposited_dose_iv_i  # Normalize by deposited dose
+    terminal_half_life_iv = calculate_terminal_half_life(time_iv, conc_iv)
+
+    # Estimate AUC_inf by adding the last concentration extrapolated to infinity
+    aucinf_iv = auclast_iv_linear + (conc_iv[-1] / ke_iv)
+    aucinf_dose_iv = aucinf_iv / deposited_dose_iv_i  # Normalize by deposited dose
+
+    metrics_iv.append({
+        "Animal": i + 1,
+        "tmax (hr)": tmax_iv,
+        "cmax (pg/mL)": cmax_iv,
+        "cmax/dose (kg*pg/mL/MIU)": cmax_dose_iv,
+        "auclast (hr*pg/mL) linear": auclast_iv_linear,
+        "auclast/dose (hr*kg*pg/mL/MIU) linear": auclast_dose_iv_linear,
+        "auclast (hr*pg/mL) log": auclast_iv_log,
+        "auclast/dose (hr*kg*pg/mL/MIU) log": auclast_dose_iv_log,
+        "terminal t1/2 (hr)": terminal_half_life_iv,
+        "aucinf (hr*pg/mL)": aucinf_iv,
+        "aucinf/dose (hr*kg*pg/mL/MIU)": aucinf_dose_iv,
+        "CL (L/hr)": cl,
+        "ke (1/hr)": ke_iv,
+        "F": F_iv
+    })
+
+# Process Inhalation data
+for i in range(concentration_inhalation.shape[0]):
+    # Inhalation Data for current animal
+    conc_inhalation = concentration_inhalation[i]
+    deposited_dose_inh_i = deposited_dose_inh[i]  # Deposited dose for current animal in miu/kg
+
+    # Initial parameter guesses for ka, ke, and F (bioavailability)
+    initial_guesses_inhalation = [0.8, 0.1, 0.5]  # Initial guess for ke from literature or previous studies
+
+    # Fit the model to the inhalation data
+    params_inhalation, _ = curve_fit(pk_model, time_inhalation, conc_inhalation, p0=initial_guesses_inhalation)
+    ka_inhalation, ke_inhalation, F_inhalation = params_inhalation
+
+    # Store estimated parameters
+    ka_inhalation_all.append(ka_inhalation)
+    ke_inhalation_all.append(ke_inhalation)
+    F_inhalation_all.append(F_inhalation)
+
+    # Store fitted concentrations
+    fitted_concentration_inhalation.append(pk_model(time_inhalation, ka_inhalation, ke_inhalation, F_inhalation))
+
+    # Calculate AUC for inhalation data
+    auc_inh_linear = calculate_auc_linear(time_inhalation, conc_inhalation)
+    auc_inh_log = calculate_auc_log(time_inhalation, conc_inhalation)
+
+    # Calculate pharmacokinetic metrics for inhalation data
+    tmax = time_inhalation[np.argmax(conc_inhalation)]
+    cmax = np.max(conc_inhalation)
+    cmax_dose = cmax / deposited_dose_inh_i  # Normalize by deposited dose
+    auclast_inh_linear = auc_inh_linear
+    auclast_dose_inh_linear = auclast_inh_linear / deposited_dose_inh_i  # Normalize by deposited dose
+    auclast_inh_log = auc_inh_log
+    auclast_dose_inh_log = auclast_inh_log / deposited_dose_inh_i  # Normalize by deposited dose
+    terminal_half_life_inh = calculate_terminal_half_life(time_inhalation, conc_inhalation)
+
+    # Estimate AUC_inf by adding the last concentration extrapolated to infinity
+    aucinf = auclast_inh_linear + (conc_inhalation[-1] / ke_inhalation)
+    aucinf_dose = aucinf / deposited_dose_inh_i  # Normalize by deposited dose
+
+    metrics_inhalation.append({
+        "Animal": i + 1,
+        "tmax (hr)": tmax_iv,
+        "cmax (pg/mL)": cmax_iv,
+        "cmax/dose (kg*pg/mL/MIU)": cmax_dose_iv,
+        "auclast (hr*pg/mL) linear": auclast_iv_linear,
+        "auclast/dose (hr*kg*pg/mL/MIU) linear": auclast_dose_iv_linear,
+        "auclast (hr*pg/mL) log": auclast_iv_log,
+        "auclast/dose (hr*kg*pg/mL/MIU) log": auclast_dose_iv_log,
+        "terminal t1/2 (hr)": terminal_half_life_iv,
+        "aucinf (hr*pg/mL)": aucinf_iv,
+        "aucinf/dose (hr*kg*pg/mL/MIU)": aucinf_dose_iv,
+        "CL (L/hr)": cl,
+        "ke (1/hr)": ke_iv,
+        "F": F_iv,
+        "ke (1/hr)": ke_inhalation
+
+    })
+
+# Create DataFrames to display the metrics
+metrics_iv_df = pd.DataFrame(metrics_iv)
+metrics_inhalation_df = pd.DataFrame(metrics_inhalation)
+print("IV Data Metrics:")
+print(metrics_iv_df)
+print("\nInhalation Data Metrics:")
+print(metrics_inhalation_df)
+
+# Plotting the fitted concentrations for IV data
+plt.figure(figsize=(12, 6))
+for i, conc_iv in enumerate(fitted_concentration_iv):
+    plt.plot(time_iv, conc_iv, label=f'Animal {i + 1}')
+plt.xlabel('Time (hours)')
+plt.ylabel('Concentration (pg/mL)')
+plt.title('Fitted Concentrations for IV Data')
+plt.legend()
+plt.grid(True)
+plt.show()
+
+# Plotting the fitted concentrations for Inhalation data
+plt.figure(figsize=(12, 6))
+for i, conc_inhalation in enumerate(fitted_concentration_inhalation):
+    plt.plot(time_inhalation, conc_inhalation, label=f'Animal {i + 1}')
+plt.xlabel('Time (hours)')
+plt.ylabel('Concentration (pg/mL)')
+plt.title('Fitted Concentrations for Inhalation Data')
+plt.legend()
+plt.grid(True)
+plt.show()
