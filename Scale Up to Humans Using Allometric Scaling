@@ -1,0 +1,17 @@
+# Define body weights (in kg)
+body_weight_rat = 0.25  # 250 grams
+body_weight_human = 70  # 70 kg
+
+# Define allometric scaling exponents
+exponent_clearance = 0.75
+exponent_absorption = -0.25
+
+# Scale parameters to humans using allometric scaling with average values
+ka_avg = np.mean(ka_inhalation_all)
+cl_avg = np.mean(metrics_iv_df['CL'])
+
+ka_human = ka_avg * (body_weight_human / body_weight_rat) ** exponent_absorption
+cl_human = cl_avg * (body_weight_human / body_weight_rat) ** exponent_clearance
+
+print(f"Scaled Absorption Rate Constant for Human (ka): {ka_human:.2f} 1/h")
+print(f"Scaled Clearance for Human (CL): {cl_human:.2f} L/h")
