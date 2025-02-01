@@ -1,0 +1,127 @@
+import numpy as np
+from scipy.stats import lognorm
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+from IPython.display import HTML, display
+
+# Particle size distribution parameters (example values)
+D50 = 2.5  # µm
+D10 = 1.0  # µm
+D90 = 4.0  # µm
+
+# Log-normal distribution parameters
+GMD = D50  # Geometric Mean Diameter
+GSD = (D90 / D10) ** (1 / 1.282)  # Geometric Standard Deviation
+
+# Generate particle sizes based on log-normal distribution
+particle_sizes = lognorm.rvs(s=np.log(GSD), scale=GMD, size=1000)
+time_steps = 100  # Time steps for simulation
+initial_particle_count = 100  # Initial particle count
+
+# Airway geometry and airflow based on ICRP reference values
+regions = ['Mouth', 'Trachea', 'Bronchi', 'Bronchioles', 'Alveoli']
+flow_velocities = [30, 20, 15, 10, 5]  # Example flow rates for regions (cm/s)
+region_lengths = [10, 12, 15, 20, 25]  # Example lengths for regions (cm)
+region_areas = [2.5, 1.8, 1.5, 1.2, 1.0]  # Example cross-sectional areas for regions (cm²)
+time = np.linspace(0, 1, time_steps)  # Time vector for single breath (seconds)
+
+# Constants for deposition mechanisms (example values)
+k_s = 0.01  # Gravitational Sedimentation constant
+k_i = 0.001  # Inertial Impaction constant
+k_d = 0.1  # Diffusion constant
+
+# Define empirical correlations for deposition mechanisms
+def gravitational_sedimentation(d, area):
+    return k_s * d / area
+
+def inertial_impaction(d, velocity):
+    return k_i * d**2 * velocity
+
+def diffusion_brownian(d):
+    return k_d / d**2
+
+# Combine the deposition mechanisms to get total deposition fraction
+def total_deposition_fraction(d, area, velocity):
+    # Apply different weights based on particle size
+    grav_weight = 1 if d > 1 else 0.1
+    impaction_weight = 1 if 1 < d <= 10 else 0.1
+    diffusion_weight = 1 if d < 0.5 else 0.1
+
+    return min(grav_weight * gravitational_sedimentation(d, area) +
+               impaction_weight * inertial_impaction(d, velocity) +
+               diffusion_weight * diffusion_brownian(d), 1.0)
+
+# Calculate deposition fractions for each region based on particle sizes
+def calculate_deposition(particle_size, region_index):
+    area = region_areas[region_index]
+    velocity = flow_velocities[region_index]
+    return total_deposition_fraction(particle_size, area, velocity)
+
+# Simulate particle movement and deposition for a single breath
+def simulate_particle_movement(particle_sizes, regions, time_steps, flow_velocities, region_lengths, region_areas, initial_particle_count):
+    particle_counts = np.zeros((len(regions), time_steps))
+    counts = np.zeros(len(regions))
+    counts[0] = initial_particle_count  # Initial count at the mouth
+    for t in range(time_steps):
+        new_counts = np.zeros(len(regions))
+        for i in range(len(regions)-1):
+            deposition_fraction = calculate_deposition(particle_sizes[t % len(particle_sizes)], i)
+            deposition = counts[i] * deposition_fraction
+            remaining = counts[i] - deposition
+            new_counts[i] += remaining  # Remaining particles in the current region
+            new_counts[i+1] += deposition  # Deposited particles move to the next region
+        new_counts[-1] += counts[-1]  # Particles in the last region remain there
+        particle_counts[:, t] = new_counts
+        counts = new_counts
+    return particle_counts
+
+# Generate particle movement and deposition data
+particle_counts_small = simulate_particle_movement(particle_sizes[particle_sizes < 1], regions, time_steps, flow_velocities, region_lengths, region_areas, initial_particle_count)
+particle_counts_medium = simulate_particle_movement(particle_sizes[(particle_sizes >= 1) & (particle_sizes < 5)], regions, time_steps, flow_velocities, region_lengths, region_areas, initial_particle_count)
+particle_counts_large = simulate_particle_movement(particle_sizes[particle_sizes >= 5], regions, time_steps, flow_velocities, region_lengths, region_areas, initial_particle_count)
+
+# Combine particle counts for animation
+particle_counts_combined = [particle_counts_small, particle_counts_medium, particle_counts_large]
+
+# Animation function for different size ranges in a single figure
+def animate_particle_movement(particle_counts_combined, regions, time_steps, size_ranges):
+    fig, ax = plt.subplots(figsize=(12, 8))
+    colors = ['#1f77b4', '#ff7f0e', '#2ca02c']
+    width = 0.2
+    x = np.arange(len(regions))
+
+    bar_groups = []
+    for i, (particle_counts, size_range, color) in enumerate(zip(particle_counts_combined, size_ranges, colors)):
+        bar = ax.bar(x + i * width, particle_counts[:, 0], width, color=color, label=f'Particle Size {size_range}')
+        bar_groups.append(bar)
+
+    ax.set_yscale('log')
+    ax.set_ylim(1e-2, 1e2)
+    ax.set_xticks(x + width)
+    ax.set_xticklabels(regions)
+    ax.set_xlabel('Lung Region')
+    ax.set_ylabel('log(Particle Count)')
+    ax.legend()
+
+    def init():
+        for bar_group, particle_counts in zip(bar_groups, particle_counts_combined):
+            for bar, h in zip(bar_group, particle_counts[:, 0]):
+                bar.set_height(h)
+        return [bar for bar_group in bar_groups for bar in bar_group]
+
+    def update(frame):
+        for bar_group, particle_counts in zip(bar_groups, particle_counts_combined):
+            for bar, h in zip(bar_group, particle_counts[:, frame]):
+                bar.set_height(h)
+        return [bar for bar_group in bar_groups for bar in bar_group]
+
+    ani = FuncAnimation(fig, update, frames=range(time_steps), init_func=init, blit=True)
+    plt.close(fig)
+    return ani
+
+# Define size ranges
+size_ranges = ['< 1 µm', '1 µm ≤ Size < 5 µm', '≥ 5 µm']
+
+# Display the animation
+ani = animate_particle_movement(particle_counts_combined, regions, time_steps, size_ranges)
+display(HTML(ani.to_jshtml()))
